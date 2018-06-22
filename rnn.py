@@ -14,6 +14,8 @@ def parse_args():
 
     parser.add_argument('--text_path', type=str, default='./text.txt', help='File path of text file to be read')
 
+    parser.add_argument('--check_path', type=str, default='./check', help='File path to save checkpoints')
+
     parser.add_argument('--logs_path', type=str, default='./logs', help='File path of logs for tensorboard')
 
     parser.add_argument('--n_hidden', type=int, default=512, help='Number of hidden units in a single LSTM cell')
@@ -44,6 +46,11 @@ def check_args(args):
     files = glob.glob(args.logs_path+'/*')
     for f in files:
         os.remove(f)
+
+    try:
+        os.mkdir(args.check_path)
+    except Exception:
+        pass
 
     try:
         assert args.n_hidden >= 1
@@ -99,6 +106,7 @@ def get_data(args):
 
 
 def gen_data(for_dic, inv_dic, args):
+    n_input = args.n_input
     data_path = args.text_path
     fp = open(data_path,"r")
     inp = []
@@ -107,7 +115,7 @@ def gen_data(for_dic, inv_dic, args):
     temp = []
     ct = 0
     for word in fp.read().split():
-        if(ct==3):
+        if(ct==n_input):
             inp.append(temp)
             ct = 0
             temp = []
@@ -132,7 +140,8 @@ def rnn(inp_, weight, bias, args):
     inp_ = tf.reshape(inp_, [-1, n_input])
     inp_ = tf.split(inp_, n_input, 1)
 
-    rnn_cell = tf.contrib.rnn.BasicLSTMCell(n_hidden)
+    # rnn_cell = tf.contrib.rnn.BasicLSTMCell(n_hidden)
+    rnn_cell = tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.BasicLSTMCell(n_hidden),tf.contrib.rnn.BasicLSTMCell(n_hidden)])
     outputs, states = tf.contrib.rnn.static_rnn(rnn_cell, inp_, dtype=tf.float32)
 
     return tf.matmul(outputs[-1], weight) + bias
@@ -146,6 +155,7 @@ def main(args):
     epochs = args.num_epochs
     learning_rate = args.learning_rate
     batch_size = args.batch_size
+    check_path = args.check_path
 
 
 
@@ -173,7 +183,7 @@ def main(args):
 
     with tf.Session() as sess:
         # sess.run(init)
-        saver.restore(sess,"./freeze/model.ckpt")
+        saver.restore(sess, os.path.join(check_path,"model.ckpt"))
         X, Y = gen_data(for_dic, inv_dic, args)
         X = np.array(X)
         Y = np.array(Y)
@@ -186,8 +196,8 @@ def main(args):
             if(epoch%50==0 and epoch!=0):
                 learning_rate = learning_rate*0.7
             for i in progressbar.progressbar(range(len(X))):
-                batchx = np.zeros((1,3,1))
-                batchy = np.zeros((1,112))
+                batchx = np.zeros((1,n_input,1))
+                batchy = np.zeros((1,vocab_size))
 
                 batchx[0] = X[i,:,:]
                 batchy[0] = Y[i,:,:]
@@ -198,7 +208,7 @@ def main(args):
                 writer.add_summary(summary, pt)
                 pt+=1
                 avg_acc +=  acc
-                saver.save(sess, "./freeze/model.ckpt")
+                saver.save(sess, os.path.join(check_path,"model.ckpt"))
                 temp = onehot_pred[0,:]
                 temp = temp.tolist()
                 oht_pred_index = int(np.argmax(temp))
