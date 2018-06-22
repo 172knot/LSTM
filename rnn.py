@@ -1,6 +1,11 @@
 import numpy as np
 import tensorflow as tf
 import progressbar
+
+tf.reset_default_graph()
+
+
+logs_path = "./logs"
 vocab_size = 0
 n_input = 3
 n_hidden = 512
@@ -65,6 +70,7 @@ def rnn(inp_, weight, bias):
 
 
 def main():
+    global learning_rate
     for_dic, inv_dic = get_data()
     weight = tf.Variable(tf.random_normal([n_hidden, vocab_size]))
     bias =  tf.Variable(tf.random_normal([vocab_size]))
@@ -76,19 +82,31 @@ def main():
     cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=pred, labels=y))
     optimizer = tf.train.RMSPropOptimizer(learning_rate=learning_rate).minimize(cost)
 
+    correct = tf.equal(tf.argmax(pred, 1), tf.argmax(y, 1))
+    accuracy = tf.reduce_mean(tf.cast(correct, 'float'))
+
+    tf.summary.scalar("cost", cost)
+    tf.summary.scalar("accuracy ", accuracy)
+
+    summary_op = tf.summary.merge_all()
     init = tf.global_variables_initializer()
     saver = tf.train.Saver()
+    writer = tf.summary.FileWriter(logs_path, graph=tf.get_default_graph())
 
     with tf.Session() as sess:
-        sess.run(init)
+        # sess.run(init)
         saver.restore(sess,"./freeze/model.ckpt")
         X, Y = gen_data(for_dic, inv_dic)
         X = np.array(X)
         Y = np.array(Y)
         fp = open("text.txt","r")
         ct = 0
+        pt = 0
         for epoch in range(epochs):
             epoch_loss = 0
+            avg_acc = 0
+            if(epoch%50==0 and epoch!=0):
+                learning_rate = learning_rate*0.7
             for i in progressbar.progressbar(range(len(X))):
                 batchx = np.zeros((1,3,1))
                 batchy = np.zeros((1,112))
@@ -97,7 +115,10 @@ def main():
                 batchy[0] = Y[i,:,:]
                 batchx = np.array(batchx)
                 batchy = np.array(batchy)
-                _, loss, onehot_pred = sess.run([optimizer, cost, pred], feed_dict={x: batchx, y: batchy})
+                _, loss, onehot_pred, acc, summary = sess.run([optimizer, cost, pred, accuracy, summary_op], feed_dict={x: batchx, y: batchy})
+                writer.add_summary(summary, pt)
+                pt+=1
+                avg_acc +=  acc
                 saver.save(sess, "./freeze/model.ckpt")
                 temp = onehot_pred[0,:]
                 temp = temp.tolist()
@@ -107,8 +128,8 @@ def main():
                 temp2 = temp2.tolist()
                 oht_pred_index2 = int(np.argmax(temp2))
                 epoch_loss += loss
-
-            print("Epoch: [",epoch,"]",epoch_loss)
+            avg_acc /= len(X)
+            print("Epoch: ",epoch,"loss: ", epoch_loss, "acc: ", avg_acc)
 
 
 if(__name__=="__main__"):
